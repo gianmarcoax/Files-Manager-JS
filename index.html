@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Sistema de Archivos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .file-card {
+            width: 120px;
+            height: 150px;
+            margin: 10px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .file-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto;
+        }
+        .context-menu {
+            position: absolute;
+            z-index: 1000;
+        }
+        #search-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .file-card.border-primary {
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    
+    <div class="container mt-5">
+        <h1 class="mb-4">Simulador de Sistema de Archivos</h1>
+        <div class="mb-3">
+            <button class="btn btn-secondary" onclick="goBack()">Atrás</button>
+            <span id="current-path" class="ms-3"></span>
+        </div>
+        <div class="mb-3">
+            <input type="text" id="search-bar" class="form-control" placeholder="Buscar archivos o carpetas...">
+            <div id="search-results" class="list-group mt-2"></div>
+        </div>
+        <div class="mb-3">
+            <button class="btn btn-primary" onclick="createFile()">Crear Archivo</button>
+            <button class="btn btn-secondary" onclick="createDirectory()">Crear Directorio</button>
+        </div>
+        <div id="file-container" class="d-flex flex-wrap">
+            <!-- Aquí se mostrarán los archivos y directorios -->
+        </div>
+    </div>
+
+    <!-- Menú contextual -->
+    <div id="context-menu" class="context-menu dropdown-menu">
+        <a class="dropdown-item" href="#" onclick="copySelected()">Copiar</a>
+        <a class="dropdown-item" href="#" onclick="pasteSelected()">Pegar</a>
+        <a class="dropdown-item" href="#" onclick="renameSelected()">Renombrar</a>
+        <a class="dropdown-item" href="#" onclick="deleteSelected()">Eliminar</a>
+        <a class="dropdown-item" href="#" onclick="infoSelected()">información</a>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
