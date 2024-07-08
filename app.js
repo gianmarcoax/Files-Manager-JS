@@ -1,13 +1,15 @@
+let fileToMove = null;
+
 class FileNode {
-    constructor(name, isDirectory = false, parent = null) {
+    constructor(name, isDirectory = false, parent = null, content = '') {
         this.name = name;
         this.isDirectory = isDirectory;
         this.children = isDirectory ? [] : null;
-        this.content = isDirectory ? null : '';
+        this.content = isDirectory ? null : content;
         this.creationDate = new Date();
         this.modifiedDate = new Date();
         this.parent = parent;
-        this.size = 0; // Para archivos, esto representará el tamaño del contenido
+        this.size = isDirectory ? 0 : new TextEncoder().encode(content).length;
     }
 
     getType() {
@@ -27,6 +29,27 @@ class FileNode {
             return this.children.reduce((total, child) => total + child.getSize(), 0);
         }
         return this.size;
+    }
+
+    setContent(content) {
+        if (!this.isDirectory) {
+            this.content = content;
+            this.size = new TextEncoder().encode(content).length;
+            this.modifiedDate = new Date();
+            this.updateParentSizes();
+        }
+    }
+
+    getContent() {
+        return this.content;
+    }
+
+    updateParentSizes() {
+        let parent = this.parent;
+        while (parent) {
+            parent.size = parent.getSize();
+            parent = parent.parent;
+        }
     }
 }
 
@@ -80,6 +103,13 @@ let currentDirectory = fileSystem.root;
 let selectedFile = null;
 let copiedFile = null;
 
+function moveSelected() {
+    if (selectedFile) {
+        fileToMove = selectedFile;
+        console.log(`Preparado para mover: ${selectedFile.name}`);
+    }
+}
+
 function updateFileList() {
     const fileContainer = document.getElementById('file-container');
     fileContainer.innerHTML = '';
@@ -97,6 +127,10 @@ function updateFileList() {
             e.preventDefault();
             showContextMenu(e, file);
         };
+        // Añadir evento de doble clic para archivos de texto
+        if (!file.isDirectory && file.name.toLowerCase().endsWith('.txt')) {
+            card.ondblclick = () => showFileContent(file);
+        }
         card.innerHTML = `
             <img src="${file.isDirectory ? 'folder_logo.png' : 'file_logo.png'}" class="card-img-top file-icon" alt="${file.isDirectory ? 'Directory' : 'File'}">
             <div class="card-body p-2">
@@ -105,7 +139,6 @@ function updateFileList() {
         `;
         fileContainer.appendChild(card);
     });
-
     // Inicializa la funcionalidad de búsqueda
     const searchBar = document.getElementById('search-bar');
     searchBar.oninput = () => {
@@ -119,6 +152,7 @@ function updateFileList() {
     };
 
     updateCurrentPath();
+
 }
 
 function updateCurrentPath() {
@@ -142,6 +176,13 @@ function showContextMenu(e, file) {
     contextMenu.style.left = `${e.pageX}px`;
     contextMenu.style.top = `${e.pageY}px`;
     selectedFile = file;
+
+    // Mostrar u ocultar opciones según el tipo de archivo
+    const moveOption = contextMenu.querySelector('a[onclick="moveSelected()"]');
+    const pasteOption = contextMenu.querySelector('a[onclick="pasteSelected()"]');
+    
+    moveOption.style.display = 'block';
+    pasteOption.style.display = copiedFile || fileToMove ? 'block' : 'none';
 }
 
 document.addEventListener('click', () => {
@@ -149,7 +190,9 @@ document.addEventListener('click', () => {
     contextMenu.style.display = 'none';
 });
 
-
+function isNameTaken(name, currentDirectory) {
+    return currentDirectory.children.some(child => child.name.toLowerCase() === name.toLowerCase());
+}
 
 function infoSelected() {
     if (selectedFile) {
@@ -161,6 +204,12 @@ function infoSelected() {
             'Tipo de archivo': selectedFile.getType()
         };
 
+        if (!selectedFile.isDirectory) {
+            info['Contenido'] = selectedFile.getContent();
+        } else {
+            info['Elementos'] = selectedFile.children.length;
+        }
+
         let infoString = Object.entries(info)
             .map(([key, value]) => `${key}: ${value}`)
             .join('\n');
@@ -171,7 +220,14 @@ function infoSelected() {
 
 function copySelected() {
     if (selectedFile) {
-        copiedFile = selectedFile;
+        function deepCopy(node) {
+            const newNode = new FileNode(node.name, node.isDirectory, null, node.content);
+            if (node.isDirectory) {
+                newNode.children = node.children.map(child => deepCopy(child));
+            }
+            return newNode;
+        }
+        copiedFile = deepCopy(selectedFile);
         console.log(`Copiado: ${selectedFile.name}`);
     }
 }
@@ -180,11 +236,15 @@ function copySelected() {
 
 function renameSelected() {
     if (selectedFile) {
-        const newName = prompt(`Renombrar ${selectedFile.name} a:`, selectedFile.name);
+        let newName = prompt(`Renombrar ${selectedFile.name} a:`, selectedFile.name);
         if (newName && newName !== selectedFile.name) {
+            while (isNameTaken(newName, currentDirectory)) {
+                newName = prompt(`El nombre "${newName}" ya existe. Por favor, elija otro nombre:`);
+                if (!newName) return; // El usuario canceló
+            }
             console.log(`Renombrando ${selectedFile.name} a ${newName}`);
             selectedFile.name = newName;
-            selectedFile.modifiedDate = new Date(); // Actualizamos la fecha de modificación
+            selectedFile.modifiedDate = new Date();
             updateFileList();
         }
     }
@@ -197,6 +257,7 @@ function deleteSelected() {
             const index = currentDirectory.children.indexOf(selectedFile);
             if (index > -1) {
                 currentDirectory.children.splice(index, 1);
+                selectedFile.updateParentSizes();
                 updateFileList();
             }
         }
@@ -204,53 +265,101 @@ function deleteSelected() {
 }
 
 function pasteSelected() {
-    if (copiedFile) {
-        console.log(`Pegando ${copiedFile.name} en ${currentDirectory.name}`);
-        const newNode = new FileNode(copiedFile.name, copiedFile.isDirectory, currentDirectory);
-        newNode.content = copiedFile.content;
-        newNode.size = copiedFile.size;
-        newNode.creationDate = new Date(); // Nueva fecha de creación para la copia
-        newNode.modifiedDate = new Date(); // Nueva fecha de modificación para la copia
-        if (copiedFile.isDirectory) {
-            function copyChildren(source, target) {
-                source.children.forEach(child => {
-                    const newChild = new FileNode(child.name, child.isDirectory, target);
-                    newChild.content = child.content;
-                    newChild.size = child.size;
-                    newChild.creationDate = new Date(); // Nueva fecha de creación para cada elemento copiado
-                    newChild.modifiedDate = new Date(); // Nueva fecha de modificación para cada elemento copiado
-                    target.children.push(newChild);
-                    if (child.isDirectory) {
-                        copyChildren(child, newChild);
-                    }
-                });
+    if (copiedFile || fileToMove) {
+        const sourceFile = copiedFile || fileToMove;
+        
+        function getUniqueName(name, isDirectory) {
+            let baseName = name;
+            let extension = '';
+            if (!isDirectory) {
+                const parts = name.split('.');
+                if (parts.length > 1) {
+                    extension = '.' + parts.pop();
+                    baseName = parts.join('.');
+                }
             }
-            copyChildren(copiedFile, newNode);
+            let newName = name;
+            let counter = 1;
+            while (currentDirectory.children.some(child => child.name === newName)) {
+                newName = `${baseName}(${counter})${extension}`;
+                counter++;
+            }
+            return newName;
         }
-        currentDirectory.children.push(newNode);
+
+        const newName = getUniqueName(sourceFile.name, sourceFile.isDirectory);
+        
+        if (fileToMove) {
+            // Mover el archivo
+            const index = fileToMove.parent.children.indexOf(fileToMove);
+            if (index > -1) {
+                fileToMove.parent.children.splice(index, 1);
+            }
+            fileToMove.parent = currentDirectory;
+            fileToMove.name = newName;
+            currentDirectory.children.push(fileToMove);
+            fileToMove.updateParentSizes();
+            fileToMove = null;
+        } else {
+            // Copiar el archivo
+            function deepCopy(node, parent) {
+                const newNode = new FileNode(node.name, node.isDirectory, parent, node.content);
+                newNode.size = node.size;
+                if (node.isDirectory) {
+                    node.children.forEach(child => {
+                        const copiedChild = deepCopy(child, newNode);
+                        newNode.children.push(copiedChild);
+                    });
+                }
+                return newNode;
+            }
+            
+            const newNode = deepCopy(sourceFile, currentDirectory);
+            newNode.name = newName;
+            currentDirectory.children.push(newNode);
+            newNode.updateParentSizes();
+        }
+        
         updateFileList();
+        console.log(`${fileToMove ? 'Movido' : 'Copiado'}: ${sourceFile.name} a ${currentDirectory.name}`);
     }
 }
 
 function createFile() {
-    const fileName = prompt('Ingrese el nombre del archivo:');
-    if (fileName) {
-        const size = parseInt(prompt('Ingrese el tamaño del archivo en bytes:', '0')) || 0;
-        const newFile = new FileNode(fileName, false, currentDirectory);
-        newFile.size = size;
-        newFile.creationDate = new Date(); // Esto ya está en el constructor, pero lo dejamos por claridad
-        newFile.modifiedDate = new Date(); // Esto ya está en el constructor, pero lo dejamos por claridad
+    let fileName = prompt('Ingrese el nombre del archivo (debe terminar en .txt):');
+    if (fileName && fileName.toLowerCase().endsWith('.txt')) {
+        while (isNameTaken(fileName, currentDirectory)) {
+            fileName = prompt(`El nombre "${fileName}" ya existe. Por favor, elija otro nombre:`);
+            if (!fileName) return; // El usuario canceló
+        }
+        const content = prompt('Ingrese el contenido del archivo:') || '';
+        const newFile = new FileNode(fileName, false, currentDirectory, content);
         currentDirectory.children.push(newFile);
+        newFile.updateParentSizes();
         updateFileList();
+    } else if (fileName) {
+        alert('El nombre del archivo debe terminar en .txt');
+    }
+}
+
+function editFileContent() {
+    if (selectedFile && !selectedFile.isDirectory) {
+        const newContent = prompt('Editar contenido:', selectedFile.getContent());
+        if (newContent !== null) {
+            selectedFile.setContent(newContent);
+            updateFileList();
+        }
     }
 }
 
 function createDirectory() {
-    const dirName = prompt('Ingrese el nombre del directorio:');
+    let dirName = prompt('Ingrese el nombre del directorio:');
     if (dirName) {
+        while (isNameTaken(dirName, currentDirectory)) {
+            dirName = prompt(`El nombre "${dirName}" ya existe. Por favor, elija otro nombre:`);
+            if (!dirName) return; // El usuario canceló
+        }
         const newDir = new FileNode(dirName, true, currentDirectory);
-        newDir.creationDate = new Date(); // Esto ya está en el constructor, pero lo dejamos por claridad
-        newDir.modifiedDate = new Date(); // Esto ya está en el constructor, pero lo dejamos por claridad
         currentDirectory.children.push(newDir);
         updateFileList();
     }
@@ -268,8 +377,14 @@ function goBack() {
 function searchFiles(query) {
     const results = [];
     function searchInNode(node, path) {
-        if (node.name.toLowerCase().includes(query.toLowerCase())) {
-            results.push({ node, path });
+        const lowerQuery = query.toLowerCase();
+        if (node.name.toLowerCase().includes(lowerQuery)) {
+            results.push({ node, path, matchType: 'name' });
+        }
+        if (!node.isDirectory && node.name.toLowerCase().endsWith('.txt')) {
+            if (node.getContent().toLowerCase().includes(lowerQuery)) {
+                results.push({ node, path, matchType: 'content' });
+            }
         }
         if (node.isDirectory) {
             node.children.forEach(child => {
@@ -289,7 +404,8 @@ function displaySearchResults(results) {
         const item = document.createElement('a');
         item.href = '#';
         item.className = 'list-group-item list-group-item-action';
-        item.textContent = result.path + '/' + result.node.name;
+        const matchType = result.matchType === 'name' ? 'nombre' : 'contenido';
+        item.textContent = `${result.path}/${result.node.name} (Coincidencia en ${matchType})`;
         item.onclick = (e) => {
             e.preventDefault();
             navigateToFile(result.node, result.path);
@@ -305,24 +421,67 @@ function navigateToFile(node, path) {
     parts.forEach(part => {
         currentDirectory = currentDirectory.children.find(child => child.name === part);
     });
+    
+    // Limpia la barra de búsqueda
+    const searchBar = document.getElementById('search-bar');
+    searchBar.value = '';
+    
+    // Limpia los resultados de búsqueda
+    document.getElementById('search-results').innerHTML = '';
+    
+    // Actualiza la lista de archivos
     updateFileList();
+
     if (!node.isDirectory) {
         // Si es un archivo, selecciónalo visualmente
-        const fileElements = document.querySelectorAll('.file-card');
-        fileElements.forEach(elem => {
-            if (elem.querySelector('.card-text').textContent === node.name) {
-                elem.classList.add('border-primary');
-                elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        });
+        setTimeout(() => {
+            const fileElements = document.querySelectorAll('.file-card');
+            fileElements.forEach(elem => {
+                if (elem.querySelector('.card-text').textContent === node.name) {
+                    elem.classList.add('border-primary');
+                    elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Abre automáticamente el archivo si es un .txt
+                    if (node.name.toLowerCase().endsWith('.txt')) {
+                        showFileContent(node);
+                    }
+                }
+            });
+        }, 100); // Pequeño retraso para asegurar que los elementos se han renderizado
     }
 }
 //******************** */
+function downloadFile() {
+    if (selectedFile && !selectedFile.isDirectory && selectedFile.name.toLowerCase().endsWith('.txt')) {
+        const blob = new Blob([selectedFile.getContent()], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = selectedFile.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } else {
+        alert('Solo se pueden descargar archivos de texto (.txt)');
+    }
+}
+
+function showFileContent(file) {
+    if (!file.isDirectory && file.name.toLowerCase().endsWith('.txt')) {
+        const modalTitle = document.getElementById('fileContentModalLabel');
+        const modalContent = document.getElementById('fileContentPre');
+        modalTitle.textContent = file.name;
+        modalContent.textContent = file.getContent();
+        
+        const modal = new bootstrap.Modal(document.getElementById('fileContentModal'));
+        modal.show();
+    }
+}
 
 // Inicializar con algunos archivos y directorios de ejemplo
 fileSystem.insert('/Documentos', true);
 fileSystem.insert('/Imágenes', true);
-fileSystem.insert('/archivo1.txt');
-fileSystem.insert('/archivo2.txt');
-
+fileSystem.root.children.push(new FileNode('archivo1.txt', false, fileSystem.root, 'Contenido del archivo 1'));
+fileSystem.root.children.push(new FileNode('archivo2.txt', false, fileSystem.root, 'Contenido del archivo 2'));
 updateFileList();
